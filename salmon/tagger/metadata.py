@@ -22,6 +22,7 @@ def get_metadata(path, tags, rls_data=None):
     """
     click.secho("\nChecking metadata...", fg="cyan", bold=True)
     searchstrs = make_searchstrs(rls_data["artists"], rls_data["title"])
+    click.secho(f"Searching for '{searchstrs}' releases...", fg="cyan", bold=True)
     kwargs = (
         dict(artists=[a for a, _ in rls_data["artists"]], album=rls_data["title"])
         if rls_data
@@ -31,9 +32,9 @@ def get_metadata(path, tags, rls_data=None):
         searchstrs, filter=False, track_count=len(tags), **kwargs
     )
     choices = _print_search_results(search_results, rls_data)
-    metadata = _select_choice(choices, rls_data)
+    metadata, source_url = _select_choice(choices, rls_data)
     remove_various_artists(metadata["tracks"])
-    return metadata
+    return metadata, source_url
 
 
 def _print_search_results(results, rls_data=None):
@@ -77,6 +78,7 @@ def _print_search_results(results, rls_data=None):
 
 
 def _select_choice(choices, rls_data):
+    source_url = None
     """
     Allow the user to select a metadata choice. Then, if the metadata came from a scraper,
     run the scrape(s) and return combined metadata.
@@ -86,7 +88,7 @@ def _select_choice(choices, rls_data):
             res = click.prompt(
                 click.style(
                     "\nWhich metadata results would you like to use? Other "
-                    "options: paste URLs, [m]anual, [a]bort",
+                    "options: paste URLs, [m]anual, [a], prefix choice or URL with \"*\" to indicate source (WEB)",
                     fg="magenta",
                     bold=True,
                 ),
@@ -96,7 +98,7 @@ def _select_choice(choices, rls_data):
             res = click.prompt(
                 click.style(
                     "\nNo metadata results were found. Options: paste URLs, "
-                    "[m]anual, [a]bort",
+                    "[m]anual, [a]bort, prefix URL with \"*\" to indicate source (WEB)",
                     fg="magenta",
                     bold=True,
                 ),
@@ -104,12 +106,18 @@ def _select_choice(choices, rls_data):
             )
 
         if res.lower().startswith("m"):
-            return _get_manual_metadata(rls_data)
+            return _get_manual_metadata(rls_data), None
         elif res.lower().startswith("a"):
             raise click.Abort
 
         sources, tasks = [], []
         for r in res.split():
+            if r.startswith("*"):
+                r = r[1:]
+                if r.lower().startswith("http"):
+                    source_url = r
+                elif r.strip().isdigit() and int(r) in choices:
+                    source_url = SEARCHSOURCES[choices[int(r)][0]].Searcher.format_url(choices[int(r)][1])
             if r.lower().startswith("http"):
                 for name, source in METASOURCES.items():
                     if source.Scraper.regex.match(r.strip()):
@@ -133,7 +141,7 @@ def _select_choice(choices, rls_data):
         )
         meta = clean_metadata(meta)
         meta["artists"], meta["tracks"] = generate_artists(meta["tracks"])
-        return meta
+        return meta, source_url
 
 
 def _get_manual_metadata(rls_data):

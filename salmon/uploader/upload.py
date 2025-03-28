@@ -34,6 +34,7 @@ def prepare_and_upload(
     hybrid,
     lossy_master,
     spectral_urls,
+    spectral_ids,
     lossy_comment,
     request_id,
     source_url
@@ -49,6 +50,7 @@ def prepare_and_upload(
             hybrid,
             cover_url,
             spectral_urls,
+            spectral_ids,
             lossy_comment,
             request_id,
             source_url=source_url
@@ -61,6 +63,7 @@ def prepare_and_upload(
             track_data,
             hybrid,
             spectral_urls,
+            spectral_ids,
             lossy_comment,
             request_id,
             source_url=source_url
@@ -94,6 +97,7 @@ def compile_data_new_group(
     hybrid,
     cover_url,
     spectral_urls,
+    spectral_ids,
     lossy_comment,
     request_id=None,
     source_url=None
@@ -127,7 +131,7 @@ def compile_data_new_group(
         "image": cover_url,
         "album_desc": generate_description(track_data, metadata),
         "release_desc": generate_t_description(
-            metadata, track_data, hybrid, metadata["urls"], spectral_urls, lossy_comment, source_url
+            metadata, track_data, hybrid, metadata["urls"], spectral_urls, spectral_ids, lossy_comment, source_url
         ),
         'requestid': request_id,
     }
@@ -140,6 +144,7 @@ def compile_data_existing_group(
     track_data,
     hybrid,
     spectral_urls,
+    spectral_ids,
     lossy_comment,
     request_id,
     source_url=None
@@ -162,7 +167,7 @@ def compile_data_existing_group(
         "vbr": metadata["encoding_vbr"],
         "media": metadata["source"],
         "release_desc": generate_t_description(
-            metadata, track_data, hybrid, metadata["urls"], spectral_urls, lossy_comment, source_url
+            metadata, track_data, hybrid, metadata["urls"], spectral_urls, spectral_ids, lossy_comment, source_url
         ),
         'requestid': request_id,
     }
@@ -262,7 +267,7 @@ def generate_description(track_data, metadata):
 
 
 def generate_t_description(
-    metadata, track_data, hybrid, metadata_urls, spectral_urls, lossy_comment, source_url
+    metadata, track_data, hybrid, metadata_urls, spectral_urls, spectral_ids, lossy_comment, source_url
 ):
     """
     Generate the torrent description. Add information about each file, and
@@ -270,21 +275,26 @@ def generate_t_description(
     """
     description = ""
     if spectral_urls:
-        description += make_spectral_bbcode(list(track_data.keys()), spectral_urls)
+        description += make_spectral_bbcode(spectral_ids, spectral_urls)
 
     if not hybrid:
         track = next(iter(track_data.values()))
         if track["precision"]:
-            description += "Encode Specifics: {} bit {:.01f} kHz\n".format(
+            if config.ICONS_IN_DESCRIPTIONS:
+                description += "[img]https://ptpimg.me/pu93q2.png[/img]"
+            else:
+                description += "Encode Specifics:"
+            description += " [b]{} bit [color=#2E86C1]{:.01f}[/color] kHz[/b]".format(
                 track["precision"], track["sample rate"] / 1000
             )
+            description += "\n"
         else:
             description += "Encode Specifics: {:.01f} kHz\n".format(
                 track["sample rate"] / 1000
             )
 
     if metadata["date"]:
-        description += f'Released on {metadata["date"]}\n'
+        description += f'Released on [b]{metadata["date"]}[/b]\n'
 
     if config.INCLUDE_TRACKLIST_IN_T_DESC or hybrid:
         for filename, track in track_data.items():
@@ -307,16 +317,30 @@ def generate_t_description(
         description += f"[u]Lossy Notes:[/u]\n{lossy_comment}\n\n"
 
     if source_url is not None:
-        description += f"[b]Source:[/b]\n[url]{source_url}[/url]\n\n"
+        for name, source in METASOURCES.items():
+            if source.Scraper.regex.match(source_url):
+                if config.ICONS_IN_DESCRIPTIONS:
+                    description += f"[b]Source:[/b] [pad=0|3][url={source_url}][img]{SOURCE_ICONS[name]}[/img] {name}[/url][/pad]\n\n"
+                else:
+                    description += f"[b]Source:[/b] [url={source_url}]{name}[/url]\n\n"
+                matched = True
+                break
+
+        if not matched:
+            # Extract hostname without TLD for unmatched URLs
+            hostname = re.match(r'https?://(?:www\.)?([^/]+)', source_url)
+            if hostname:
+                description += f"[b]Source:[/b] [url={source_url}]{hostname.group(1)}[/url]\n\n"
+        
 
     if metadata_urls:
-        description += "[b]More info:[/b] " + generate_source_links(metadata_urls)
+        description += "[b]More info:[/b] " + generate_source_links(metadata_urls, source_url)
         description += "\n"
 
     return description
 
 
-def generate_source_links(metadata_urls):
+def generate_source_links(metadata_urls, source_url=None):
     links = []
     unmatched_urls = []
 
